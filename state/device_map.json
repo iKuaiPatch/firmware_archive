@@ -1,0 +1,262 @@
+{
+  "a100-p": {
+    "model_type": "A100-P",
+    "platform": "arm",
+    "system": "community"
+  },
+  "a120": {
+    "model_type": "A120",
+    "platform": "mips",
+    "system": "community"
+  },
+  "a125": {
+    "model_type": "A125",
+    "platform": "mips",
+    "system": "community"
+  },
+  "a130": {
+    "model_type": "A130",
+    "platform": "mips",
+    "system": "community"
+  },
+  "a135s": {
+    "model_type": "A135S",
+    "platform": "mips",
+    "system": "community"
+  },
+  "a139s": {
+    "model_type": "A139S",
+    "platform": "mips",
+    "system": "community"
+  },
+  "a160": {
+    "model_type": "A160",
+    "platform": "arm",
+    "system": "community"
+  },
+  "a160_oem": {
+    "model_type": "A160_oem",
+    "platform": "arm",
+    "system": "community"
+  },
+  "a220pro": {
+    "model_type": "A220PRO",
+    "platform": "arm",
+    "system": "community"
+  },
+  "a50": {
+    "model_type": "A50",
+    "platform": "arm",
+    "system": "community"
+  },
+  "a50-p": {
+    "model_type": "A50-P",
+    "platform": "arm",
+    "system": "community"
+  },
+  "c20": {
+    "model_type": "C20",
+    "platform": "mips",
+    "system": "community"
+  },
+  "c25-g": {
+    "model_type": "C25-G",
+    "platform": "mips",
+    "system": "community"
+  },
+  "c3000": {
+    "model_type": "C3000",
+    "platform": "arm",
+    "system": "community"
+  },
+  "c50": {
+    "model_type": "C50",
+    "platform": "mips",
+    "system": "community"
+  },
+  "c90": {
+    "model_type": "C90",
+    "platform": "mips",
+    "system": "community"
+  },
+  "g05": {
+    "model_type": "G05",
+    "platform": "mips",
+    "system": "community"
+  },
+  "m08": {
+    "model_type": "M08",
+    "platform": "arm",
+    "system": "community"
+  },
+  "m1": {
+    "model_type": "M1",
+    "platform": "mips",
+    "system": "community"
+  },
+  "m1_oem": {
+    "model_type": "M1_oem",
+    "platform": "mips",
+    "system": "community"
+  },
+  "m100": {
+    "model_type": "M100",
+    "platform": "arm",
+    "system": "community"
+  },
+  "m100_oem": {
+    "model_type": "M100_oem",
+    "platform": "arm",
+    "system": "community"
+  },
+  "m10s": {
+    "model_type": "M10S",
+    "platform": "arm",
+    "system": "community"
+  },
+  "m10s_oem": {
+    "model_type": "M10S_oem",
+    "platform": "arm",
+    "system": "community"
+  },
+  "m2": {
+    "model_type": "M2",
+    "platform": "mips",
+    "system": "community"
+  },
+  "m200": {
+    "model_type": "M200",
+    "platform": "arm",
+    "system": "community"
+  },
+  "m200_oem": {
+    "model_type": "M200_oem",
+    "platform": "arm",
+    "system": "community"
+  },
+  "m360x": {
+    "model_type": "M360X",
+    "platform": "arm",
+    "system": "community"
+  },
+  "m5": {
+    "model_type": "M5",
+    "platform": "mips",
+    "system": "community"
+  },
+  "m50": {
+    "model_type": "M50",
+    "platform": "mips",
+    "system": "community"
+  },
+  "m5s": {
+    "model_type": "M5S",
+    "platform": "arm",
+    "system": "community"
+  },
+  "m5s_oem": {
+    "model_type": "M5S_oem",
+    "platform": "arm",
+    "system": "community"
+  },
+  "m60": {
+    "model_type": "M60",
+    "platform": "arm",
+    "system": "community"
+  },
+  "q1800": {
+    "model_type": "Q1800",
+    "platform": "mips",
+    "system": "community"
+  },
+  "q1800l": {
+    "model_type": "Q1800L",
+    "platform": "mips",
+    "system": "community"
+  },
+  "q3000": {
+    "model_type": "Q3000",
+    "platform": "arm",
+    "system": "community"
+  },
+  "q3000_oem": {
+    "model_type": "Q3000_oem",
+    "platform": "arm",
+    "system": "community"
+  },
+  "q3600": {
+    "model_type": "Q3600",
+    "platform": "arm",
+    "system": "community"
+  },
+  "q3s": {
+    "model_type": "Q3S",
+    "platform": "arm",
+    "system": "community"
+  },
+  "q3s_oem": {
+    "model_type": "Q3S_oem",
+    "platform": "arm",
+    "system": "community"
+  },
+  "q50": {
+    "model_type": "Q50",
+    "platform": "mips",
+    "system": "community"
+  },
+  "q6000": {
+    "model_type": "Q6000",
+    "platform": "arm",
+    "system": "community"
+  },
+  "q6000_oem": {
+    "model_type": "Q6000_oem",
+    "platform": "arm",
+    "system": "community"
+  },
+  "q80": {
+    "model_type": "Q80",
+    "platform": "mips",
+    "system": "community"
+  },
+  "q85": {
+    "model_type": "Q85",
+    "platform": "mips",
+    "system": "community"
+  },
+  "q90": {
+    "model_type": "Q90",
+    "platform": "mips",
+    "system": "community"
+  },
+  "x64": {
+    "platform": "x86-64",
+    "system": "community",
+    "model_type": "X86"
+  },
+  "x64ent": {
+    "model_type": "X86ENT",
+    "platform": "x86-64",
+    "system": "enterprise"
+  },
+  "x86": {
+    "model_type": "X86",
+    "platform": "x86",
+    "system": "community"
+  },
+  "x86_oem": {
+    "model_type": "X86_oem",
+    "platform": "x86-64",
+    "system": "community"
+  },
+  "x86ent": {
+    "model_type": "X86ENT",
+    "platform": "x86",
+    "system": "enterprise"
+  },
+  "y3000g-pro": {
+    "model_type": "Y3000G-PRO",
+    "platform": "arm",
+    "system": "community"
+  }
+}
