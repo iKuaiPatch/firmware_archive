@@ -54,6 +54,11 @@
     "platform": "arm",
     "system": "community"
   },
+  "a50x-p": {
+    "model_type": "A50X-P",
+    "platform": "arm",
+    "system": "community"
+  },
   "c20": {
     "model_type": "C20",
     "platform": "mips",
@@ -94,11 +99,6 @@
     "platform": "mips",
     "system": "community"
   },
-  "m1_oem": {
-    "model_type": "M1_oem",
-    "platform": "mips",
-    "system": "community"
-  },
   "m100": {
     "model_type": "M100",
     "platform": "arm",
@@ -117,6 +117,11 @@
   "m10s_oem": {
     "model_type": "M10S_oem",
     "platform": "arm",
+    "system": "community"
+  },
+  "m1_oem": {
+    "model_type": "M1_oem",
+    "platform": "mips",
     "system": "community"
   },
   "m2": {
@@ -161,6 +166,11 @@
   },
   "m60": {
     "model_type": "M60",
+    "platform": "arm",
+    "system": "community"
+  },
+  "m60x": {
+    "model_type": "M60X",
     "platform": "arm",
     "system": "community"
   },
@@ -230,9 +240,9 @@
     "system": "community"
   },
   "x64": {
+    "model_type": "X86",
     "platform": "x86-64",
-    "system": "community",
-    "model_type": "X86"
+    "system": "community"
   },
   "x64ent": {
     "model_type": "X86ENT",
