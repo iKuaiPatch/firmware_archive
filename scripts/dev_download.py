@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import random
+import re
 import secrets
 import shutil
 import ssl
@@ -34,6 +35,7 @@ DEFAULT_CERT = SCRIPT_DIR / "mtls" / "client.crt"
 DEFAULT_KEY = SCRIPT_DIR / "mtls" / "client.key"
 ROOT_DIR = SCRIPT_DIR.parent
 DEVICE_MAP_FILE = ROOT_DIR / "state" / "device_map.json"
+UPDATE_CONTENT_FILE = ROOT_DIR / "state" / "update_contents.json"
 MTLS_VERIFY_SERVER = False
 DEVICE_GWID = secrets.token_hex(16)
 DEVICE_SECRET = DEVICE_GWID[-10:]
@@ -385,6 +387,7 @@ class VersionAllFirmware:
     key: str
     filename: str
     device_name: str
+    optional: bool = False
 
 
 class TLSAdapter(HTTPAdapter):
@@ -652,6 +655,121 @@ def version_all_relative_path(entry: VersionAllFirmware) -> Path:
     return Path("firmware") / version_all_device_name(entry) / version_all_edition(entry) / entry.filename
 
 
+def iso_candidate_entry(entry: VersionAllFirmware) -> VersionAllFirmware | None:
+    base_name = base_section_name(entry.section)
+    if base_name.upper() != "X86" or not entry.filename.lower().endswith(".bin"):
+        return None
+    return VersionAllFirmware(
+        entry.section,
+        entry.key,
+        f"{entry.filename[:-4]}.iso",
+        entry.device_name,
+        optional=True,
+    )
+
+
+def add_iso_candidates(entries: Iterable[VersionAllFirmware]) -> list[VersionAllFirmware]:
+    result: list[VersionAllFirmware] = []
+    seen: set[Path] = set()
+    for entry in entries:
+        for candidate in (entry, iso_candidate_entry(entry)):
+            if candidate is None:
+                continue
+            relative_path = version_all_relative_path(candidate)
+            if relative_path in seen:
+                continue
+            seen.add(relative_path)
+            result.append(candidate)
+    return result
+
+
+def decode_update_content(value: str) -> str:
+    text = value.strip()
+    text = text.replace("\\\\r\\\\n", "\n").replace("\\\\n", "\n")
+    return text.replace("\\r\\n", "\n").replace("\\n", "\n")
+
+
+def firmware_version_key(filename: str, fallback_version: str, edition: str) -> str:
+    name = Path(filename).name
+    match = re.search(
+        r"(?:^|_)(\d+(?:\.\d+)+(?:_(?:alpha|beta))?)(?:_Enterprise)?_Build(\d+)",
+        name,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return f"{match.group(1)}-{edition}-{match.group(2)}"
+    return f"{fallback_version}-{edition}" if fallback_version else edition
+
+
+def load_update_contents(path: Path) -> dict[str, dict[str, str]]:
+    if not path.exists():
+        return {}
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, Mapping):
+        return {}
+
+    result: dict[str, dict[str, str]] = {}
+    for device_name, versions in raw.items():
+        if not isinstance(versions, Mapping):
+            continue
+        result[str(device_name)] = {
+            str(version): str(content)
+            for version, content in versions.items()
+        }
+    return result
+
+
+def merge_update_contents(
+    target: dict[str, dict[str, str]],
+    updates: Mapping[str, Mapping[str, str]],
+) -> None:
+    for device_name, versions in updates.items():
+        target_versions = target.setdefault(str(device_name), {})
+        for version, content in versions.items():
+            target_versions[str(version)] = str(content)
+
+
+def save_update_contents(path: Path, updates: Mapping[str, Mapping[str, str]]) -> None:
+    if not updates:
+        return
+
+    current = load_update_contents(path)
+    edition_pattern = r"free|enterprise|oem|alpha|beta"
+    for device_name, versions in updates.items():
+        device_versions = current.setdefault(str(device_name), {})
+        for version_key in versions:
+            match = re.match(rf"^(.+)-({edition_pattern})-(\d+)$", str(version_key))
+            if match:
+                device_versions.pop(f"{match.group(1)}-{match.group(3)}", None)
+        device_versions.update({str(version): str(content) for version, content in versions.items()})
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(current, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def collect_update_contents(
+    sections: Mapping[str, Mapping[str, str]],
+    entries: list[VersionAllFirmware],
+) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+
+    for entry in entries:
+        section = sections.get(entry.section)
+        if not section:
+            continue
+
+        update_content = decode_update_content(str(section.get("update_content", "")))
+        if not update_content:
+            continue
+
+        fallback_version = str(section.get("system_ver", "")).strip()
+        version_key = firmware_version_key(entry.filename, fallback_version, version_all_edition(entry))
+        result.setdefault(version_all_device_name(entry), {})[version_key] = update_content
+
+    return result
+
+
 def git_tracked_paths(prefix: str) -> set[str]:
     try:
         result = subprocess.run(
@@ -824,8 +942,12 @@ def persist_verified_new_devices(args: argparse.Namespace, entries: list[Version
                 break
 
 
-def collect_dev_type_firmware(args: argparse.Namespace, seed_entries: list[VersionAllFirmware]) -> list[VersionAllFirmware]:
+def collect_dev_type_firmware(
+    args: argparse.Namespace,
+    seed_entries: list[VersionAllFirmware],
+) -> tuple[list[VersionAllFirmware], dict[str, dict[str, str]]]:
     result: list[VersionAllFirmware] = []
+    updates: dict[str, dict[str, str]] = {}
     tried_model_types: set[str] = set()
 
     for seed_entry in seed_entries:
@@ -848,17 +970,17 @@ def collect_dev_type_firmware(args: argparse.Namespace, seed_entries: list[Versi
                 continue
 
             sections = parse_version_all_sections(decode_version_all(raw_version_all))
-            result.extend(
-                collect_public_version_all_firmware(
-                    sections,
-                    include_beta=True,
-                    device_filter=args.device,
-                    firmware_types={"alpha", "beta"},
-                )
+            entries = collect_public_version_all_firmware(
+                sections,
+                include_beta=True,
+                device_filter=args.device,
+                firmware_types={"alpha", "beta"},
             )
+            result.extend(entries)
+            merge_update_contents(updates, collect_update_contents(sections, entries))
             break
 
-    return result
+    return result, updates
 
 
 def request_sign_url(
@@ -1051,6 +1173,8 @@ def run_version_all(args: argparse.Namespace, device: DeviceInfo, device_name: s
 
     sections = parse_version_all_sections(decode_version_all(raw_version_all))
     entries = select_version_all_firmware(sections, device, args.include_beta)
+    save_update_contents(UPDATE_CONTENT_FILE, collect_update_contents(sections, entries))
+    entries = add_iso_candidates(entries)
     mtls_session: requests.Session | None = None
     failures: list[str] = []
 
@@ -1084,6 +1208,9 @@ def run_version_all(args: argparse.Namespace, device: DeviceInfo, device_name: s
             download_file(mtls_session, str(sign_url), headers, output_file, args.debug)
             print(f"downloaded: {output_file}")
         except RuntimeError as exc:
+            if entry.optional:
+                print(f"skipped: {output_file} (iso unavailable)")
+                continue
             message = f"{device_name}/{entry.filename}: {exc}"
             print(message, file=sys.stderr)
             failures.append(message)
@@ -1133,7 +1260,11 @@ def run_public_version_all(args: argparse.Namespace, output_root: Path) -> int:
     if not entries:
         raise RuntimeError("Version_all has no firmware entries")
     persist_verified_new_devices(args, entries)
-    entries = dedupe_version_all_entries([*entries, *collect_dev_type_firmware(args, entries)])
+    updates = collect_update_contents(sections, entries)
+    dev_entries, dev_updates = collect_dev_type_firmware(args, entries)
+    merge_update_contents(updates, dev_updates)
+    save_update_contents(UPDATE_CONTENT_FILE, updates)
+    entries = add_iso_candidates(dedupe_version_all_entries([*entries, *dev_entries]))
 
     mtls_session: requests.Session | None = None
     tracked_firmware = git_tracked_paths("firmware")
@@ -1159,6 +1290,10 @@ def run_public_version_all(args: argparse.Namespace, output_root: Path) -> int:
             downloaded += 1
             print(f"downloaded: {relative_path.as_posix()}")
         except RuntimeError as exc:
+            if entry.optional:
+                skipped += 1
+                print(f"skipped: {relative_path.as_posix()} (iso unavailable)")
+                continue
             message = f"{relative_path.as_posix()}: {exc}"
             print(message, file=sys.stderr)
             failures.append(message)

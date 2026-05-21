@@ -35,14 +35,8 @@ DOWNLOAD_USER_AGENT = os.environ.get("IKUAI_DOWNLOAD_USER_AGENT", "curl/10.8")
 ua = UserAgent()
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-FREE_VERSION_FILE = ROOT_DIR / "version_list.txt"
-ENTERPRISE_VERSION_FILE = ROOT_DIR / "version_enterprise_list.txt"
-OEM_VERSION_FILE = ROOT_DIR / "version_oem_list.txt"
-STATE_FILE = ROOT_DIR / "state" / "latest_versions.json"
 UPDATE_CONTENT_FILE = ROOT_DIR / "state" / "update_contents.json"
 
-EDITIONS = ("free", "enterprise", "oem")
-FORMATS = ("iso", "bin")
 ARCH_DEVICE_NAMES = {
     "x32": "x86",
     "x64": "x64",
@@ -61,6 +55,7 @@ class FirmwareAsset:
     url: str
     device_name: str = ""
     firmware_name: str = ""
+    optional: bool = False
 
     @property
     def relative_path(self) -> Path:
@@ -232,6 +227,14 @@ def version_all_url(section_name: str, key: str, filename: str) -> str:
     return f"https://patch.ikuai8.com/firmware/{firmware_directory}/{filename}"
 
 
+def iso_candidate_filename(section_name: str, filename: str) -> str | None:
+    base_name = version_all_base_section(section_name)
+    name = Path(filename).name
+    if base_name.upper() != "X86" or not name.lower().endswith(".bin"):
+        return None
+    return f"{name[:-4]}.iso"
+
+
 def version_all_filter_matches(
     section_name: str,
     key: str,
@@ -288,6 +291,23 @@ def collect_version_all_assets(
             seen.add(asset.relative_path)
             assets.append(asset)
 
+            iso_filename = iso_candidate_filename(section_name, filename)
+            if iso_filename:
+                iso_asset = FirmwareAsset(
+                    edition=version_all_edition(section_name),
+                    format_name="iso",
+                    arch="",
+                    version=version,
+                    filename=iso_filename,
+                    url=version_all_url(section_name, key, iso_filename),
+                    device_name=device_name,
+                    firmware_name=section_firmware_name(section, iso_filename),
+                    optional=True,
+                )
+                if iso_asset.relative_path not in seen:
+                    seen.add(iso_asset.relative_path)
+                    assets.append(iso_asset)
+
     return assets
 
 
@@ -303,12 +323,7 @@ def update_content_filter_matches(
 
 
 def update_content_edition(section_name: str) -> str:
-    base_name = version_all_base_section(section_name)
-    if base_name.upper() == "X86ENT":
-        return "enterprise"
-    if base_name.lower().endswith("_oem"):
-        return "oem"
-    return "free"
+    return version_all_edition(section_name)
 
 
 def firmware_version_key(filename: str, fallback_version: str, edition: str) -> str:
@@ -388,7 +403,7 @@ def save_update_contents(path: Path, updates: dict[str, dict[str, str]]) -> None
     for device_name, versions in updates.items():
         device_versions = current.setdefault(device_name, {})
         for version_key in versions:
-            match = re.match(r"^(.+)-(free|enterprise|oem)-(\d+)$", version_key)
+            match = re.match(r"^(.+)-(free|enterprise|oem|alpha|beta)-(\d+)$", version_key)
             if match:
                 device_versions.pop(f"{match.group(1)}-{match.group(3)}", None)
         device_versions.update(versions)
@@ -397,180 +412,10 @@ def save_update_contents(path: Path, updates: dict[str, dict[str, str]]) -> None
     path.write_text(json.dumps(current, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def extract_version(filename: str, edition: str) -> str:
-    name = Path(filename).name
-    if edition == "free":
-        for prefix in ("iKuai8_x32_", "iKuai8_x64_"):
-            if name.startswith(prefix):
-                return name[len(prefix):-4]
-    elif edition == "enterprise":
-        for prefix in ("iKuai8_x32_", "iKuai8_x64_"):
-            if name.startswith(prefix):
-                body = name[len(prefix):-4]
-                version_text, build_text = body.split("_Enterprise_Build", 1)
-                return f"{version_text}_Build{build_text}"
-    elif edition == "oem" and name.startswith("oem_x64_"):
-        return name[len("oem_x64_"):-4]
-
-    raise ValueError(f"无法解析版本号: {filename}")
-
-
-def split_version(version: str) -> tuple[str, str]:
-    return version.split("_Build", 1)
-
-
-def build_latest_metadata(sections: dict[str, dict[str, str]]) -> dict[str, dict[str, object]]:
-    mapping = {
-        "free": "X86",
-        "enterprise": "X86ENT",
-        "oem": "X86_oem",
-    }
-    result: dict[str, dict[str, object]] = {}
-
-    for edition, section_name in mapping.items():
-        section = sections.get(section_name)
-        if not section:
-            raise KeyError(f"官方版本源缺少分组: {section_name}")
-
-        if edition == "oem":
-            files = {"x64": section.get("firmware_x64") or section.get("firmware") or ""}
-        else:
-            files = {
-                "x32": section.get("firmware") or "",
-                "x64": section.get("firmware_x64") or "",
-            }
-
-        if not all(files.values()):
-            raise ValueError(f"{section_name} 缺少固件文件名")
-
-        sample_name = next(iter(files.values()))
-        result[edition] = {
-            "version": extract_version(sample_name, edition),
-            "files": files,
-        }
-
-    return result
-
-
-def fetch_latest_metadata(proxy: str | None) -> dict[str, dict[str, object]]:
-    sections = parse_sections(fetch_text_with_proxy(VERSION_SOURCE_URL, proxy))
-    return build_latest_metadata(sections)
-
-
 def fetch_text_with_proxy(url: str, proxy: str | None) -> str:
     request = Request(url, headers={"User-Agent": ua.random})
     with open_url(request, proxy) as response:
         return response.read().decode("utf-8", errors="replace")
-
-
-def read_versions(path: Path) -> list[str]:
-    if not path.exists():
-        return []
-
-    items: list[str] = []
-    seen: set[str] = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
-        version = line.strip()
-        if not version or version in seen:
-            continue
-        seen.add(version)
-        items.append(version)
-    return items
-
-
-def write_versions(path: Path, versions: Iterable[str]) -> bool:
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for version in versions:
-        item = version.strip()
-        if not item or item in seen:
-            continue
-        seen.add(item)
-        normalized.append(item)
-
-    content = "\n".join(normalized) + "\n"
-    previous = path.read_text(encoding="utf-8") if path.exists() else ""
-    if content == previous:
-        return False
-
-    path.write_text(content, encoding="utf-8")
-    return True
-
-
-def update_history_files(latest: dict[str, dict[str, object]]) -> None:
-    mapping = {
-        "free": FREE_VERSION_FILE,
-        "enterprise": ENTERPRISE_VERSION_FILE,
-        "oem": OEM_VERSION_FILE,
-    }
-    for edition, file_path in mapping.items():
-        current = read_versions(file_path)
-        write_versions(file_path, [str(latest[edition]["version"]), *current])
-
-
-def build_filename(edition: str, format_name: str, arch: str, version: str) -> str:
-    if edition == "free":
-        extension = "iso" if format_name == "iso" else "bin"
-        return f"iKuai8_{arch}_{version}.{extension}"
-
-    if edition == "enterprise":
-        version_text, build_text = split_version(version)
-        return f"iKuai8_{arch}_{version_text}_Enterprise_Build{build_text}.bin"
-
-    if edition == "oem":
-        return f"oem_x64_{version}.bin"
-
-    raise ValueError(f"未知分组: {edition}")
-
-
-def build_url(edition: str, format_name: str, filename: str) -> str:
-    if edition == "free" and format_name == "iso":
-        return f"https://patch.ikuai8.com/3.x/iso/{filename}"
-    if edition == "free" and format_name == "bin":
-        return f"https://patch.ikuai8.com/3.x/patch/{filename}"
-    if edition == "enterprise":
-        return f"https://patch.ikuai8.com/ent/{filename}"
-    if edition == "oem":
-        return f"https://patch.ikuai8.com/3.x/patch/{filename}"
-    raise ValueError(f"不支持的类型: {edition}/{format_name}")
-
-
-def make_asset(edition: str, format_name: str, arch: str, version: str) -> FirmwareAsset:
-    filename = build_filename(edition, format_name, arch, version)
-    return FirmwareAsset(
-        edition=edition,
-        format_name=format_name,
-        arch=arch,
-        version=version,
-        filename=filename,
-        url=build_url(edition, format_name, filename),
-    )
-
-
-def build_assets_for_version(edition: str, version: str) -> list[FirmwareAsset]:
-    if edition == "free":
-        return [
-            make_asset("free", format_name, arch, version)
-            for format_name in FORMATS
-            for arch in ("x32", "x64")
-        ]
-
-    if edition == "enterprise":
-        return [
-            make_asset("enterprise", "bin", arch, version)
-            for arch in ("x32", "x64")
-        ]
-
-    if edition == "oem":
-        return [make_asset("oem", "bin", "x64", version)]
-
-    raise ValueError(f"未知分组: {edition}")
-
-
-def ensure_layout(output_dir: Path) -> None:
-    for device_name in ARCH_DEVICE_NAMES.values():
-        for edition in EDITIONS:
-            (output_dir / "firmware" / device_name / edition).mkdir(parents=True, exist_ok=True)
 
 
 def output_path_text(path: Path) -> str:
@@ -678,6 +523,14 @@ def is_retryable_error(exc: Exception) -> bool:
     return False
 
 
+def is_optional_asset_missing(exc: Exception) -> bool:
+    if isinstance(exc, HTTPError):
+        return exc.code in {400, 403, 404}
+    if isinstance(exc, OSError):
+        return "下载返回html页面" in str(exc).lower()
+    return False
+
+
 def download_asset(
     asset: FirmwareAsset,
     output_dir: Path,
@@ -754,63 +607,14 @@ def download_assets(
             print(f"{status}: {asset.relative_path.as_posix()}")
             saved.append(path_text)
         except (HTTPError, URLError, OSError) as exc:
+            if asset.optional and is_optional_asset_missing(exc):
+                print(f"skipped: {asset.relative_path.as_posix()} (iso unavailable)")
+                continue
             message = f"{asset.relative_path.as_posix()} -> {exc}({asset.url})"
             print(message, file=sys.stderr)
             failures.append(message)
 
     return saved, failures
-
-
-def build_download_plan(mode: str, latest: dict[str, dict[str, object]]) -> list[FirmwareAsset]:
-    if mode == "latest":
-        versions_by_edition = {
-            "free": [str(latest["free"]["version"])],
-            "enterprise": [str(latest["enterprise"]["version"])],
-            "oem": [str(latest["oem"]["version"])],
-        }
-    else:
-        versions_by_edition = {
-            "free": read_versions(FREE_VERSION_FILE),
-            "enterprise": read_versions(ENTERPRISE_VERSION_FILE),
-            "oem": read_versions(OEM_VERSION_FILE),
-        }
-        for edition in EDITIONS:
-            versions_by_edition[edition] = list(
-                dict.fromkeys([str(latest[edition]["version"]), *versions_by_edition[edition]])
-            )
-
-    assets: list[FirmwareAsset] = []
-    for edition in EDITIONS:
-        for version in versions_by_edition[edition]:
-            assets.extend(build_assets_for_version(edition, version))
-    return assets
-
-
-def build_changed_assets(
-    latest: dict[str, dict[str, object]],
-    changed_editions: list[str],
-) -> list[FirmwareAsset]:
-    assets: list[FirmwareAsset] = []
-    for edition in changed_editions:
-        assets.extend(build_assets_for_version(edition, str(latest[edition]["version"])))
-    return assets
-
-
-def load_state(path: Path) -> dict[str, object]:
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def save_state(path: Path, latest: dict[str, dict[str, object]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "checked_at": datetime.now(timezone.utc).isoformat(),
-        "free": latest["free"],
-        "enterprise": latest["enterprise"],
-        "oem": latest["oem"],
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def release_timestamp() -> str:
@@ -870,14 +674,9 @@ def command_download(args: argparse.Namespace) -> int:
         device_filter = "all"
     save_update_contents(UPDATE_CONTENT_FILE, collect_update_contents(sections, device_filter))
 
-    if device_filter:
-        assets = collect_version_all_assets(sections, device_filter)
-        if not assets:
-            raise ValueError(f"Version_all 中未找到设备固件: {device_filter}")
-    else:
-        latest = build_latest_metadata(sections)
-        ensure_layout(args.output_dir)
-        assets = build_download_plan(args.mode, latest)
+    assets = collect_version_all_assets(sections, device_filter)
+    if not assets:
+        raise ValueError(f"Version_all 中未找到设备固件: {device_filter}")
 
     saved, failures = download_assets(
         assets,
@@ -893,7 +692,6 @@ def command_download(args: argparse.Namespace) -> int:
 def command_check_release(args: argparse.Namespace) -> int:
     raw_version_all = fetch_text_with_proxy(VERSION_SOURCE_URL, args.proxy)
     sections = parse_sections(raw_version_all)
-    latest = build_latest_metadata(sections)
     tracked_firmware = git_tracked_paths("firmware")
     all_assets = collect_version_all_assets(sections, "all")
     assets = [
@@ -901,6 +699,7 @@ def command_check_release(args: argparse.Namespace) -> int:
         for asset in all_assets
         if args.force or asset.relative_path.as_posix() not in tracked_firmware
     ]
+    save_update_contents(UPDATE_CONTENT_FILE, collect_update_contents(sections))
     checked_devices = sorted({asset.device_name for asset in all_assets if asset.device_name})
     print(
         f"checked devices={len(checked_devices)} "
@@ -914,9 +713,6 @@ def command_check_release(args: argparse.Namespace) -> int:
         print("no new firmware")
         return 0
 
-    save_update_contents(UPDATE_CONTENT_FILE, collect_update_contents(sections))
-    update_history_files(latest)
-
     saved, failures = download_assets(
         assets,
         args.output_dir,
@@ -928,8 +724,10 @@ def command_check_release(args: argparse.Namespace) -> int:
         write_github_outputs(False)
         return 1
 
-    if not args.dry_run:
-        save_state(args.state_file, latest)
+    if not saved:
+        write_github_outputs(False)
+        print("no downloaded firmware")
+        return 0
 
     release_notes, tag_name, release_name = write_release_files(args.release_dir, saved)
     write_github_outputs(
@@ -947,7 +745,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="iKuai firmware downloader")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    download_parser = subparsers.add_parser("download", help="下载最新固件或 Version_all 全部设备固件")
+    download_parser = subparsers.add_parser("download", help="下载 Version_all 设备固件")
     download_parser.add_argument("--mode", choices=("latest", "all"), required=True)
     download_parser.add_argument("--output-dir", type=Path, default=ROOT_DIR)
     download_parser.add_argument("--proxy", default=DEFAULT_PROXY)
@@ -958,7 +756,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     release_parser = subparsers.add_parser("check-release", help="检查新固件并生成 Release 输出")
     release_parser.add_argument("--output-dir", type=Path, default=ROOT_DIR)
-    release_parser.add_argument("--state-file", type=Path, default=STATE_FILE)
     release_parser.add_argument("--release-dir", type=Path, default=ROOT_DIR / ".release")
     release_parser.add_argument("--proxy", default=DEFAULT_PROXY)
     release_parser.add_argument("--force", action="store_true")
